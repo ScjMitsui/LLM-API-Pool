@@ -1,22 +1,51 @@
-# LLM Pool Proxy
+<div align="center">
+  <h1>🌊 LLM-API-Pool</h1>
+  <p><strong>A high-performance, concurrent API pool proxy service for LLMs</strong></p>
+</div>
 
-A high-performance, concurrent API pool proxy service written in Go. This service enables users to aggregate multiple unreliable or rate-limited text generation API endpoints and present them as a single, highly available API to any application.
+<p align="center">
+  <img src="https://img.shields.io/badge/Made%20with-Go-1f425f.svg" alt="Made with Go">
+  <img src="https://img.shields.io/badge/Concurrency-High-brightgreen.svg" alt="High Concurrency">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
+</p>
 
-## Features
+---
 
-- **Concurrent Routing & Load Balancing**: Fast routing written in Go. Requests are balanced across available endpoints using Round-Robin, Random, or Weighted strategies.
-- **Auto Health Checks & Failovers**: Automatically detects unreachable or error-prone endpoints. Bypasses failing endpoints in real time and retries requests using a different healthy provider.
-- **Model Pools (Aliases)**: Group multiple differing models from varying providers into a single "Pool". You can configure your client application to target `Pool_1`, and the proxy will dynamically route to any backend model specified in that pool.
-- **Web Admin Interface**: An elegant dashboard to view live endpoint statuses, manage your API keys, manually add or disable endpoints, and group models into pools.
-- **Live Request Logging**: Real-time observability UI showing exactly what requests came in, which endpoint served them, and any resulting upstream errors.
-- **Intelligent Error Parsing**: Intercepts error messages from upstream providers to provide detailed error context to the transparent Request Logs, allowing you to troubleshoot upstream limits easily.
-- **Live Configuration Reload**: Configurations, aliases, and endpoint keys can be modified securely from the web interface without restarting the proxy.
+**LLM-API-Pool** is a lightning-fast, highly concurrent API pool proxy service written in Go. It allows you to seamlessly aggregate multiple unreliable or rate-limited text generation API endpoints and present them as a single, bulletproof API to any client application.
 
-## Setting Up
+## ✨ Key Features
 
-1. **Install Go**: Ensure you have Go 1.20+ installed to build the binary.
-2. **Configure placeholders**: Copy `config.yaml` or edit the placeholder `config.yaml` to include your endpoints and API keys.
-3. **Build and Run**:
+- 🏎️ **Concurrent Routing & Load Balancing**  
+  Lightning-fast routing written in Go. Balance requests across your available endpoints using Round-Robin, Random, or Weighted strategies.
+  
+- 🛡️ **Auto Health Checks & Failover**  
+  Say goodbye to downtime. The proxy automatically detects unreachable or error-prone endpoints, bypassing them in real time and intelligently retrying requests on healthy providers.
+  
+- 🏊 **Model Pools (Aliases)**  
+  Group different models from various providers into a single logical "Pool". Configure your client to target a generic name like `My_Pool`, and let the proxy dynamically route your prompt to any backend model within that pool.
+
+- 🎛️ **Web Admin Interface**  
+  An elegant, built-in dashboard to monitor live endpoint statuses, manage API keys, toggle endpoints, and organize your model pools with ease.
+
+- 📊 **Live Request Logging**  
+  Real-time observability. See exactly what requests are coming in, which endpoint is serving them, and monitor any errors directly from the UI.
+  
+- 🧠 **Intelligent Error Parsing**  
+  Intercepts and decodes raw error messages from upstream providers. It feeds detailed, human-readable context back into your request logs to simplify troubleshooting rate limits or authentication outages.
+
+- 🔄 **Live Configuration Reloads**  
+  Tweak configurations, update aliases, or change pool settings securely from the web interface on the fly—zero downtime or restarts required.
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
+Ensure you have [Go 1.20+](https://go.dev/dl/) installed to build the binary.
+
+### 2. Configuration
+Copy the provided `config.yaml` template and populate it with your specific endpoints and API keys.
+
+### 3. Build & Run
+Get the proxy up and running in seconds:
 
 ```bash
 go mod tidy
@@ -24,12 +53,20 @@ go build -o proxy
 ./proxy
 ```
 
-4. **Access the Admin Panel**: Navigate to `http://localhost:5066/admin` in your web browser.
+### 4. Access the Dashboard
+Navigate to your web browser and open:
+[http://localhost:5066/admin](http://localhost:5066/admin)
 
-## Client Integration
+## 🔌 Client Integration
 
-Integrating into API clients is simple. Just set the custom API endpoint URL in your client to:
+Integrating into API clients (like SillyTavern, UI clients, or your own code) is effortless. 
 
+Simply set the custom API endpoint URL in your client to:  
 `http://localhost:5066/v1`
 
-And use either an actual model name (if it's accessible directly on your backends) or a custom Pool name defined in your Pool Aliases.
+For the model name, either use an exact model name available directly on your backends, or use a custom **Pool Name** defined in your Pool Aliases.
+
+---
+<div align="center">
+  <i>Supercharge your LLM capabilities with limitless availability. Built with ❤️ in Go.</i>
+</div>
