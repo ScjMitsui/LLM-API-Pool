@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Pool Proxy — Admin</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3" />
+                        <path
+                            d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
+                    </svg>
+                    <h1>API Pool Proxy</h1>
+                </div>
+                <span class="badge">General API</span>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-ghost" onclick="resetStats()" title="Reset Stats">🗑 Stats</button>
+                <button class="btn btn-ghost" onclick="refreshAll()" title="Refresh">↻</button>
+                <button class="btn btn-primary" onclick="saveConfig()">💾 Save Config</button>
+            </div>
+        </header>
+
+        <main class="main">
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-label">Endpoints</div>
+                </div>
+                <div class="stat-card stat-healthy">
+                    <div class="stat-value" id="stat-healthy">0</div>
+                    <div class="stat-label">Healthy</div>
+                </div>
+                <div class="stat-card stat-unhealthy">
+                    <div class="stat-value" id="stat-unhealthy">0</div>
+                    <div class="stat-label">Unhealthy</div>
+                </div>
+                <div class="stat-card stat-disabled">
+                    <div class="stat-value" id="stat-disabled">0</div>
+                    <div class="stat-label">Disabled</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-requests" style="color:#6366f1">0</div>
+                    <div class="stat-label">Total Requests</div>
+                </div>
+            </div>
+
+            <div class="card" style="padding:12px 20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600; letter-spacing:0.05em;">Request Log</span>
+                    <span id="log-count" style="font-size:0.72rem; color:var(--muted);">0 entries</span>
+                </div>
+                <div id="request-log" style="max-height:200px; overflow-y:auto; font-size:0.82rem; font-family:'Inter',monospace; border:1px solid var(--border); border-radius:8px; padding:6px 10px; background:rgba(0,0,0,0.15);">
+                    <div style="color:var(--muted); padding:8px;">No requests yet.</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Endpoints</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>API Base</th>
+                            <th>Status</th>
+                            <th>Health</th>
+                            <th>Requests</th>
+                            <th>Last Error</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="endpoints-body">
+                        <tr>
+                            <td colspan="7" class="empty">No endpoints configured</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>Add Endpoint</h2>
+                <form id="add-form" onsubmit="addEndpoint(event)">
+                    <div class="form-row">
+                        <input type="text" id="ep-name" placeholder="Name" required>
+                        <input type="url" id="ep-base" placeholder="https://api.openai.com/v1" required>
+                        <input type="password" id="ep-key" placeholder="API Key" required>
+                        <button type="submit" class="btn btn-success">+ Add</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Model Pools (Aliases)</h2>
+                <p style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;">
+                    Create named pools of models to load balance across. Use this pool name as your model in your API Client.
+                </p>
+
+                <div class="pools-layout">
+                    <div class="pools-list">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Pool Name</th>
+                                    <th>Included Models</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pools-body">
+                                <tr><td colspan="3" class="empty">No pools configured</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="pool-create">
+                        <h3 style="font-size:0.85rem;margin-bottom:8px;color:var(--text)">Create / Update Pool</h3>
+                        <form id="pool-form" onsubmit="savePool(event)">
+                            <div class="form-row" style="margin-bottom: 12px;">
+                                <input type="text" id="pool-name" placeholder="e.g. Pool_1" required>
+                                <button type="submit" class="btn btn-success">Save Pool</button>
+                            </div>
+                            <div style="font-size:0.85rem;color:var(--muted);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                                <span>Select target models:</span>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="forceRefreshModels()" title="Force query endpoints for models">↻ Fetch Models</button>
+                            </div>
+                            <div id="pool-models-checkboxes" class="endpoints-models-container">
+                                <span class="empty" style="padding:10px!important;font-size:0.8rem">Loading...</span>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card info-card">
+                <h2>API Client Connection</h2>
+                <p><b>API Type:</b> Chat Completion (OpenAI)</p>
+                <p><b>Base URL:</b> <code id="connection-url">http://localhost:5066</code></p>
+                <p><b>API Key:</b> <code>any-value-works</code></p>
+                <p><b>Stats API:</b> <code>GET /admin/stats</code></p>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <span>API Pool Proxy v1.0.0</span>
+            <a href="/docs" target="_blank">API Docs ↗</a>
+        </footer>
+    </div>
+    <div id="toast" class="toast hidden"></div>
+    <script src="/static/app.js"></script>
+</body>
+
+</html>
