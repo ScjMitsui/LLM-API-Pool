@@ -24,11 +24,11 @@ type ServerConfig struct {
 }
 
 type EndpointConfig struct {
-	Name     string   `yaml:"name"`
-	APIBase  string   `yaml:"api_base"`
-	APIKey   string   `yaml:"api_key"`
-	Enabled  bool     `yaml:"enabled"`
-	Models   []string `yaml:"models,omitempty"`
+	Name     string   `yaml:"name" json:"name"`
+	APIBase  string   `yaml:"api_base" json:"api_base"`
+	APIKey   string   `yaml:"api_key" json:"api_key"`
+	Enabled  bool     `yaml:"enabled" json:"enabled"`
+	Models   []string `yaml:"models,omitempty" json:"models,omitempty"`
 }
 
 type PoolConfig struct {
