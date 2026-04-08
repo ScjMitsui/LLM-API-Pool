@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -61,11 +62,15 @@ var (
 	GlobalRequestLog = &RequestLog{MaxSize: 50}
 )
 
+func pairKey(endpoint, model string) string {
+	return endpoint + "\t" + model
+}
+
 func InitState() {
 	cfgLock.RLock()
 	defer cfgLock.RUnlock()
 	
-	GlobalPool.Strategy = AppConfig.Pool.Strategy
+	GlobalPool.Strategy = strings.ToLower(strings.TrimSpace(AppConfig.Pool.Strategy))
 	GlobalPool.Cooldown = time.Duration(AppConfig.Pool.HealthCheckCooldown) * time.Second
 	GlobalPool.MaxRetries = AppConfig.Pool.MaxRetries
 	
@@ -160,23 +165,26 @@ func (p *Pool) Next(requestedModel string) (*Endpoint, string) {
 	return p.NextExcluding(requestedModel, nil)
 }
 
-func (p *Pool) NextExcluding(requestedModel string, exclude map[string]bool) (*Endpoint, string) {
+// NextExcluding picks the next endpoint+model pair, skipping any pairs in excludePairs.
+// excludePairs keys are "endpoint\tmodel" strings (use pairKey() to build them).
+func (p *Pool) NextExcluding(requestedModel string, excludePairs map[string]bool) (*Endpoint, string) {
 	p.Recover()
 	
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// Build available endpoints (enabled + healthy) — no pair filtering here
 	var avail []*Endpoint
 	for _, ep := range p.Endpoints {
-		if ep.Enabled && ep.Healthy && !exclude[ep.Name] {
+		if ep.Enabled && ep.Healthy {
 			avail = append(avail, ep)
 		}
 	}
 
 	if len(avail) == 0 {
-		// Panic recovery mode — only for endpoints not in the exclude set
+		// Panic recovery mode
 		for _, ep := range p.Endpoints {
-			if ep.Enabled && !exclude[ep.Name] {
+			if ep.Enabled {
 				ep.Healthy = true
 				ep.Failures = 0
 				avail = append(avail, ep)
@@ -187,15 +195,19 @@ func (p *Pool) NextExcluding(requestedModel string, exclude map[string]bool) (*E
 		return nil, ""
 	}
 
-	// 1. If explicit targets are provided via the ModelAliases map, strictly use those instead of filtering
+	// 1. If explicit targets are provided via the ModelAliases map, strictly use those
 	cfgLock.RLock()
 	mappedTargets, ok := AppConfig.ModelAliases[requestedModel]
 	cfgLock.RUnlock()
 
 	if ok && len(mappedTargets) > 0 {
 		var specificAvail []PoolTarget
-		// Ensure the endpoint associated with the target is actually enabled, healthy, and not excluded
 		for _, target := range mappedTargets {
+			// Skip tried endpoint+model pairs
+			if excludePairs[pairKey(target.Endpoint, target.Model)] {
+				continue
+			}
+			// Ensure the endpoint is actually enabled and healthy
 			for _, ep := range avail {
 				if ep.Name == target.Endpoint {
 					specificAvail = append(specificAvail, target)
@@ -206,11 +218,11 @@ func (p *Pool) NextExcluding(requestedModel string, exclude map[string]bool) (*E
 
 		if len(specificAvail) > 0 {
 			var pickedTarget PoolTarget
-			switch p.Strategy {
+			strategy := strings.ToLower(strings.TrimSpace(p.Strategy))
+			switch strategy {
 			case "random":
 				pickedTarget = specificAvail[rand.Intn(len(specificAvail))]
 			case "weighted":
-				// Build weighted selection over targets using their endpoint's success rate
 				const floor = 0.05
 				weights := make([]float64, len(specificAvail))
 				total := 0.0
@@ -241,7 +253,6 @@ func (p *Pool) NextExcluding(requestedModel string, exclude map[string]bool) (*E
 				p.Index++
 			}
 
-			// Find the actual endpoint struct for that chosen target
 			for _, ep := range avail {
 				if ep.Name == pickedTarget.Endpoint {
 					return ep, pickedTarget.Model
@@ -249,13 +260,30 @@ func (p *Pool) NextExcluding(requestedModel string, exclude map[string]bool) (*E
 			}
 		}
 		
-		// If we are here, none of the endpoints in the aliased Pool were available (or they were all excluded).
-		// We MUST NOT leak the request to other outside endpoints.
+		// None of the alias targets are available — don't leak to outside endpoints
 		return nil, ""
 	}
 
-	// 2. Otherwise, default to generic load balancing without model filtering (blind bypass as requested)
-	ep := p.pick(avail)
+	// 2. Generic load balancing — extract tried endpoint names from pairs
+	excludeEps := make(map[string]bool)
+	for key := range excludePairs {
+		parts := strings.SplitN(key, "\t", 2)
+		if len(parts) > 0 {
+			excludeEps[parts[0]] = true
+		}
+	}
+
+	var candidates []*Endpoint
+	for _, ep := range avail {
+		if !excludeEps[ep.Name] {
+			candidates = append(candidates, ep)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, ""
+	}
+
+	ep := p.pick(candidates)
 	return ep, requestedModel
 }
 
@@ -318,7 +346,8 @@ func (p *Pool) pickWeighted(candidates []*Endpoint) *Endpoint {
 }
 
 func (p *Pool) pick(candidates []*Endpoint) *Endpoint {
-	switch p.Strategy {
+	strategy := strings.ToLower(strings.TrimSpace(p.Strategy))
+	switch strategy {
 	case "random":
 		return candidates[rand.Intn(len(candidates))]
 	case "weighted":

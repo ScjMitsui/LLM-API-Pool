@@ -3,12 +3,15 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
 	if err := LoadConfig("config.yaml"); err != nil {
@@ -53,6 +56,7 @@ func main() {
 		admin.POST("/stats/reset", AdminStatsReset)
 		admin.POST("/endpoints/:name/clear_error", AdminClearError)
 		admin.GET("/log", AdminLog)
+		admin.POST("/restart", AdminRestart)
 	}
 
 	addr := fmt.Sprintf("%s:%d", AppConfig.Server.Host, AppConfig.Server.Port)

@@ -253,6 +253,16 @@ async function resetStats() {
     catch (e) { showToast('Error: ' + e.message, 'error') }
 }
 
+async function restartService() {
+    if (!confirm('Restart the proxy service? This will briefly interrupt connections.')) return;
+    try {
+        showToast('Restarting service...', 'info');
+        await fetch('/admin/restart', { method: 'POST' });
+        showToast('Service restarting — reloading in 3s...', 'success');
+        setTimeout(() => location.reload(), 3000);
+    } catch (e) { showToast('Restart failed: ' + e.message, 'error') }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const u = document.getElementById('connection-url');
     if (u) u.textContent = 'http://' + location.hostname + ':' + (location.port || '5066');

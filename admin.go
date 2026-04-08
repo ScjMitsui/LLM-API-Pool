@@ -2,6 +2,10 @@ package main
 
 import (
 	"log"
+	"os"
+	"syscall"
+	"time"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -243,4 +247,23 @@ func AdminModelsRefresh(c *gin.Context) {
 func AdminLog(c *gin.Context) {
 	entries := GlobalRequestLog.Entries()
 	c.JSON(200, gin.H{"entries": entries})
+}
+
+func AdminRestart(c *gin.Context) {
+	SaveConfig("config.yaml")
+	c.JSON(200, gin.H{"status": "restarting"})
+
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		exe, err := os.Executable()
+		if err != nil {
+			log.Printf("❌ Restart failed: cannot find executable: %v\n", err)
+			return
+		}
+		log.Println("🔄 Restarting service...")
+		err = syscall.Exec(exe, os.Args, os.Environ())
+		if err != nil {
+			log.Printf("❌ Restart failed: %v\n", err)
+		}
+	}()
 }

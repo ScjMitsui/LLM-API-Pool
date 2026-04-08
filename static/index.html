@@ -22,11 +22,11 @@
                     </svg>
                     <h1>API Pool Proxy</h1>
                 </div>
-                <span class="badge">General API</span>
+                <span class="badge">SillyTavern</span>
             </div>
             <div class="header-right">
                 <button class="btn btn-ghost" onclick="resetStats()" title="Reset Stats">🗑 Stats</button>
-                <button class="btn btn-ghost" onclick="refreshAll()" title="Refresh">↻</button>
+                <button class="btn btn-ghost" onclick="restartService()" title="Restart Service">⟳ Restart</button>
                 <button class="btn btn-primary" onclick="saveConfig()">💾 Save Config</button>
             </div>
         </header>
@@ -102,7 +102,7 @@
             <div class="card">
                 <h2>Model Pools (Aliases)</h2>
                 <p style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;">
-                    Create named pools of models to load balance across. Use this pool name as your model in your API Client.
+                    Create named pools of models to load balance across. Use this pool name as your model in SillyTavern.
                 </p>
 
                 <div class="pools-layout">
@@ -141,7 +141,7 @@
             </div>
 
             <div class="card info-card">
-                <h2>API Client Connection</h2>
+                <h2>SillyTavern Connection</h2>
                 <p><b>API Type:</b> Chat Completion (OpenAI)</p>
                 <p><b>Base URL:</b> <code id="connection-url">http://localhost:5066</code></p>
                 <p><b>API Key:</b> <code>any-value-works</code></p>

@@ -18,14 +18,80 @@ type ProxyRequest struct {
 	Stream bool   `json:"stream,omitempty"`
 }
 
+// retryableWriter buffers response headers and only commits them to the real
+// ResponseWriter when upstream returns success (< 400). Failed responses are
+// silently discarded so the caller can retry without corrupting the connection.
+// Streaming is fully supported: once committed, all writes pass through.
+type retryableWriter struct {
+	real      http.ResponseWriter
+	flusher   http.Flusher
+	headerBuf http.Header
+	failed    bool
+	committed bool
+}
+
+func newRetryableWriter(w http.ResponseWriter) *retryableWriter {
+	rw := &retryableWriter{
+		real:      w,
+		headerBuf: make(http.Header),
+	}
+	if f, ok := w.(http.Flusher); ok {
+		rw.flusher = f
+	}
+	return rw
+}
+
+func (rw *retryableWriter) Header() http.Header {
+	if rw.committed {
+		return rw.real.Header()
+	}
+	return rw.headerBuf
+}
+
+func (rw *retryableWriter) WriteHeader(code int) {
+	if rw.committed || rw.failed {
+		return
+	}
+	if code >= 400 {
+		rw.failed = true
+		return
+	}
+	// Success — copy buffered headers to real writer and commit
+	realHeader := rw.real.Header()
+	for k, vv := range rw.headerBuf {
+		for _, v := range vv {
+			realHeader.Add(k, v)
+		}
+	}
+	rw.real.WriteHeader(code)
+	rw.committed = true
+}
+
+func (rw *retryableWriter) Write(data []byte) (int, error) {
+	if rw.failed {
+		return len(data), nil
+	}
+	if !rw.committed {
+		rw.WriteHeader(http.StatusOK)
+	}
+	if rw.committed {
+		return rw.real.Write(data)
+	}
+	return len(data), nil
+}
+
+func (rw *retryableWriter) Flush() {
+	if rw.committed && rw.flusher != nil {
+		rw.flusher.Flush()
+	}
+}
+
 func ProxyHandler(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "Failed to read body"})
 		return
 	}
-	// Restore body for further reading
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	var parsedBody ProxyRequest
 	if len(bodyBytes) > 0 {
@@ -34,27 +100,31 @@ func ProxyHandler(c *gin.Context) {
 
 	requestedModel := parsedBody.Model
 	var lastErr string
+	origPath := c.Request.URL.Path // preserve across retries
 
 	maxAttempts := GlobalPool.PoolSize(requestedModel)
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
 
-	// Track which endpoints we've already tried so we don't re-pick them
-	triedEndpoints := make(map[string]bool)
+	// Track tried endpoint+model pairs (not just endpoints)
+	triedPairs := make(map[string]bool)
 
 	for i := 0; i < maxAttempts; i++ {
-		ep, targetModel := GlobalPool.NextExcluding(requestedModel, triedEndpoints)
+		ep, targetModel := GlobalPool.NextExcluding(requestedModel, triedPairs)
 		if ep == nil {
-			c.JSON(502, gin.H{"error": gin.H{"message": "No healthy endpoints available based on your pool rules. Last error: " + lastErr, "code": 502}})
+			c.JSON(502, gin.H{"error": gin.H{
+				"message": "No healthy endpoints available based on your pool rules. Last error: " + lastErr,
+				"code":    502,
+			}})
 			return
 		}
 
-		triedEndpoints[ep.Name] = true
+		triedPairs[pairKey(ep.Name, targetModel)] = true
 
 		if i > 0 {
-			log.Printf("⚠ Retry %d/%d for model %q: endpoint %s failed, now trying %s",
-				i, maxAttempts-1, requestedModel, lastErr, ep.Name)
+			log.Printf("⚠ Retry %d/%d for model %q: %s, now trying %s (model: %s)",
+				i, maxAttempts-1, requestedModel, lastErr, ep.Name, targetModel)
 		}
 
 		currentBody := bodyBytes
@@ -70,35 +140,35 @@ func ProxyHandler(c *gin.Context) {
 
 		targetURL, _ := url.Parse(ep.APIBase)
 		proxy := httputil.NewSingleHostReverseProxy(targetURL)
-		
-		// Configure Director — manually set URL to avoid path doubling
+
 		proxy.Director = func(req *http.Request) {
 			req.URL.Scheme = targetURL.Scheme
 			req.URL.Host = targetURL.Host
 			req.Host = targetURL.Host
-			// The incoming path is /v1/chat/completions and api_base already ends in /v1
-			// So use the api_base path + just the suffix after /v1
-			req.URL.Path = targetURL.Path + req.URL.Path[len("/v1"):]
+			req.URL.Path = targetURL.Path + origPath[len("/v1"):]
 			req.Header.Set("Authorization", "Bearer "+ep.APIKey)
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-			// Reset body to the possibly modified body
 			req.Body = io.NopCloser(bytes.NewBuffer(currentBody))
 			req.ContentLength = int64(len(currentBody))
 		}
 
-		// Create response catcher BEFORE handlers so closures can reference it
-		cw := &responseCatcher{ResponseWriter: c.Writer}
+		var attemptFailed bool
+		var clientDisconnected bool
 
 		proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, e error) {
+			if req.Context().Err() != nil && req.Context().Err().Error() == "context canceled" {
+				clientDisconnected = true
+				lastErr = "client disconnected"
+				return
+			}
 			GlobalPool.RecordFailure(ep, e.Error())
 			lastErr = e.Error()
-			cw.failed = true
+			attemptFailed = true
 		}
 
 		proxy.ModifyResponse = func(resp *http.Response) error {
 			if resp.StatusCode >= 400 {
-				// Read and parse the actual error body from the upstream API
 				errBody, _ := io.ReadAll(resp.Body)
 				resp.Body.Close()
 
@@ -113,7 +183,6 @@ func ProxyHandler(c *gin.Context) {
 					if json.Unmarshal(errBody, &parsed) == nil && parsed.Error.Message != "" {
 						errMsg = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, parsed.Error.Message)
 					} else {
-						// Fallback: use raw body (truncated)
 						raw := string(errBody)
 						if len(raw) > 150 {
 							raw = raw[:150] + "…"
@@ -124,43 +193,33 @@ func ProxyHandler(c *gin.Context) {
 
 				GlobalPool.RecordFailure(ep, errMsg)
 				lastErr = errMsg
-				cw.failed = true
-				return nil // We already handled the failure ourselves
+				attemptFailed = true
+				// Replace consumed body so the proxy can still write it
+				resp.Body = io.NopCloser(bytes.NewBuffer(errBody))
+				return nil
 			}
 			GlobalPool.RecordSuccess(ep, targetModel)
 			resp.Header.Set("X-Pool-Endpoint", ep.Name)
 			return nil
 		}
 
-		proxy.ServeHTTP(cw, c.Request)
+		rw := newRetryableWriter(c.Writer)
+		proxy.ServeHTTP(rw, c.Request)
 
-		if !cw.failed {
-			return // Success
+		if clientDisconnected {
+			return
 		}
-		// Loop and try next endpoint
+
+		if !attemptFailed && rw.committed {
+			return // Success — response already written/streamed to client
+		}
+		// Failed — nothing was written to c.Writer, safe to retry
 	}
 
-	c.JSON(502, gin.H{"error": gin.H{"message": "All backend attempts failed. Last error: " + lastErr, "code": 502}})
-}
-
-type responseCatcher struct {
-	gin.ResponseWriter
-	failed bool
-}
-
-func (c *responseCatcher) WriteHeader(code int) {
-	if code >= 400 {
-		c.failed = true
-		return
-	}
-	c.ResponseWriter.WriteHeader(code)
-}
-
-func (c *responseCatcher) Write(b []byte) (int, error) {
-	if c.failed {
-		return len(b), nil
-	}
-	return c.ResponseWriter.Write(b)
+	c.JSON(502, gin.H{"error": gin.H{
+		"message": "All backend attempts failed. Last error: " + lastErr,
+		"code":    502,
+	}})
 }
 
 type ModelItem struct {
@@ -191,4 +250,4 @@ func ListModels(c *gin.Context) {
 	cfgLock.RUnlock()
 
 	c.JSON(200, gin.H{"object": "list", "data": models})
-} 
+}
